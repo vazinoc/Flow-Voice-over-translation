@@ -590,6 +590,32 @@ class VideoPlayerViewModel
         }
 
         fun loadMoreCommentReplies(comment: Comment) {
+            val votClient = VotClient()
+val votController = VotAudioSyncController(applicationContext, exoPlayer)
+
+fun toggleVot(currentVideoId: String, durationSeconds: Double) {
+    val currentSettings = votController.settings.value
+    if (currentSettings.isEnabled) {
+        votController.disableTranslation()
+        return
+    }
+
+    viewModelScope.launch {
+        votController.setLoading(true)
+        val result = votClient.getTranslation(
+            videoId = currentVideoId,
+            durationSec = durationSeconds,
+            sourceLang = currentSettings.sourceLang,
+            targetLang = currentSettings.targetLang
+        )
+        if (result.status == VotStatus.SUCCESS && result.audioUrl != null) {
+            votController.setLoading(false)
+            votController.attachTranslationAudio(result.audioUrl)
+        } else {
+            votController.setLoading(false, error = result.message ?: "Не удалось перевести видео")
+        }
+    }
+}
             val videoId = _uiState.value.cachedVideo?.id ?: return
             comments.loadMoreReplies(videoId, comment)
         }
