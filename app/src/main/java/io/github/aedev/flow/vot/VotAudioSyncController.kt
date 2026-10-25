@@ -19,8 +19,8 @@ data class VotSettings(
     val isEnabled: Boolean = false,
     val sourceLang: String = "en",
     val targetLang: String = "ru",
-    val originalVolume: Float = 0.20f, // 20% громкости оригинала при включенном переводе
-    val translationVolume: Float = 1.0f // 100% громкости перевода
+    val originalVolume: Float = 0.20f,
+    val translationVolume: Float = 1.0f
 )
 
 class VotAudioSyncController(
@@ -45,42 +45,54 @@ class VotAudioSyncController(
     init {
         playerManager.playerState
             .onEach { state ->
-                // Если переключили на другое видео — выключаем перевод и возвращаем 100% громкости
                 if (state.currentVideoId != currentActiveVideoId && _settings.value.isEnabled) {
                     disableTranslation()
                 }
                 if (!_settings.value.isEnabled) return@onEach
 
-                // Удерживаем приглушенную громкость оригинала
                 setMainPlayerVolume(_settings.value.originalVolume)
 
-                // Синхронизация скорости воспроизведения
                 if (votPlayer.playbackParameters.speed != state.playbackSpeed) {
                     votPlayer.playbackParameters = PlaybackParameters(state.playbackSpeed)
                 }
 
-                // Синхронизация паузы и воспроизведения
+                // Фикс: получаем позицию безопасным методом
+                val mainPosition = getMainPositionMs()
+                
                 if (state.isPlaying && !votPlayer.isPlaying) {
-                    syncPositionIfNeeded(state.currentPosition)
+                    syncPositionIfNeeded(mainPosition)
                     votPlayer.play()
                 } else if (!state.isPlaying && votPlayer.isPlaying) {
                     votPlayer.pause()
                 }
 
-                // Синхронизация перемотки
-                syncPositionIfNeeded(state.currentPosition)
+                syncPositionIfNeeded(mainPosition)
             }
             .launchIn(scope)
     }
 
-    /**
-     * Находит ExoPlayer внутри EnhancedPlayerManager и меняет громкость оригинального видео
-     */
+    private fun getMainPositionMs(): Long {
+        try {
+            for (method in playerManager.javaClass.methods) {
+                if ((method.name == "getCurrentPosition" || method.name == "currentPosition") && method.parameterTypes.isEmpty()) {
+                    return (method.invoke(playerManager) as? Number)?.toLong() ?: 0L
+                }
+            }
+            for (field in playerManager.javaClass.declaredFields) {
+                field.isAccessible = true
+                val value = field.get(playerManager)
+                if (value is Player) {
+                    return value.currentPosition
+                }
+            }
+        } catch (_: Exception) {}
+        return 0L
+    }
+
     private fun setMainPlayerVolume(volume: Float) {
         val safeVolume = volume.coerceIn(0f, 1f)
         mainHandler.post {
             try {
-                // 1. Пробуем вызвать setVolume(Float), если такой метод есть в EnhancedPlayerManager
                 val method = playerManager.javaClass.methods.firstOrNull {
                     it.name == "setVolume" && it.parameterTypes.size == 1 &&
                         (it.parameterTypes[0] == Float::class.javaPrimitiveType || it.parameterTypes[0] == Float::class.java)
@@ -90,7 +102,6 @@ class VotAudioSyncController(
                     return@post
                 }
 
-                // 2. Иначе находим само поле ExoPlayer / Player внутри EnhancedPlayerManager и меняем ему volume
                 for (field in playerManager.javaClass.declaredFields) {
                     field.isAccessible = true
                     val value = field.get(playerManager)
@@ -99,9 +110,7 @@ class VotAudioSyncController(
                         return@post
                     }
                 }
-            } catch (_: Exception) {
-                // Игнорируем, если плеер ещё не инициализирован
-            }
+            } catch (_: Exception) {}
         }
     }
 
@@ -113,11 +122,12 @@ class VotAudioSyncController(
 
         val state = playerManager.playerState.value
         votPlayer.playbackParameters = PlaybackParameters(state.playbackSpeed)
-        votPlayer.seekTo(state.currentPosition)
+        
+        // Фикс: используем безопасный метод
+        votPlayer.seekTo(getMainPositionMs())
 
         _settings.value = _settings.value.copy(isEnabled = true)
 
-        // Приглушаем оригинальную дорожку видео
         setMainPlayerVolume(_settings.value.originalVolume)
 
         if (state.isPlaying) {
@@ -130,8 +140,6 @@ class VotAudioSyncController(
         _settings.value = _settings.value.copy(isEnabled = false)
         votPlayer.pause()
         votPlayer.clearMediaItems()
-
-        // Возвращаем 100% громкости оригинальному видео
         setMainPlayerVolume(1.0f)
     }
 
