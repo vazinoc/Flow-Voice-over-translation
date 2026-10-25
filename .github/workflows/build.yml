@@ -18,16 +18,20 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
+      - name: Use CI Gradle properties
+        # Возвращаем родные лимиты памяти от разработчиков Flow, чтобы сервер не захлебнулся
+        run: mkdir -p ~/.gradle && cp .github/ci-gradle.properties ~/.gradle/gradle.properties
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build Debug APK
-        # Собираем только Debug-версию, чтобы она установилась на любой телефон
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Build GitHub Debug APK
+        # Собираем ТОЛЬКО одну версию (githubDebug). 
+        # --no-daemon убивает фоновые процессы после шага, освобождая ОЗУ.
+        run: ./gradlew assembleGithubDebug --stacktrace --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: flow-debug-apk
-          # Ищем сгенерированный APK во всех папках debug
-          path: app/build/outputs/apk/**/debug/*.apk
+          path: app/build/outputs/apk/github/debug/*.apk
