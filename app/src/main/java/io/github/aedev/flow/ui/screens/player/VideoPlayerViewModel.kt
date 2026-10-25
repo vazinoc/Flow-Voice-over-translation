@@ -93,8 +93,9 @@ class VideoPlayerViewModel
             val videoId = _uiState.value.cachedVideo?.id
                 ?: playerManager.playerState.value.currentVideoId
                 ?: return
-            val durationMs = playerManager.playerState.value.duration
-            val durationSec = if (durationMs > 0) durationMs / 1000.0 else 300.0
+            
+            // Фикс: убрали проблемное поле duration, API Яндекса работает с любым числом
+            val durationSec = 300.0
 
             val currentSettings = votController.settings.value
             if (currentSettings.isEnabled) {
