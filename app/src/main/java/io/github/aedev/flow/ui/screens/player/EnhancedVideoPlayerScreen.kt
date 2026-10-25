@@ -46,20 +46,15 @@ import io.github.aedev.flow.ui.screens.player.state.queueDockPlacement
 import io.github.aedev.flow.ui.screens.player.state.rememberPlayerCommentsUiState
 import io.github.aedev.flow.ui.utils.LocalWindowIsLandscape
 import io.github.aedev.flow.ui.utils.LocalWindowSizeClass
+import io.github.aedev.flow.vot.VotActionBar
+import io.github.aedev.flow.vot.VotSettingsBottomSheet
 import kotlin.math.roundToInt
 
-/** A readable cap for the dock, which would otherwise stretch across a tablet's whole width. */
 private val QueueDockMaxWidth = 600.dp
 private val QueueDockMargin = 16.dp
 private val QueueDockGap = 8.dp
 private val ListEndPadding = 80.dp
 
-/**
- * EnhancedVideoPlayerScreen - Simplified version for DraggablePlayerLayout
- *
- * This composable only renders the VIDEO DETAILS (description, comments, related videos).
- * The video player surface and all effects are handled by FlowApp.kt
- */
 @UnstableApi
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3AdaptiveApi::class)
 @Composable
@@ -68,7 +63,7 @@ internal fun EnhancedVideoPlayerScreen(
     video: Video,
     alpha: () -> Float,
     videoPlayerHeightPx: () -> Float = { 0f },
-    screenState: PlayerScreenState, // Shared screenState from FlowApp
+    screenState: PlayerScreenState,
     isFullscreenShown: Boolean,
     prefs: VideoPlayerPreferencesState,
     onVideoClick: (Video) -> Unit,
@@ -82,6 +77,13 @@ internal fun EnhancedVideoPlayerScreen(
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val commentsUiState = rememberPlayerCommentsUiState(viewModel)
+
+    // --- Состояние Яндекс VOT ---
+    val votSettings by viewModel.votController.settings.collectAsStateWithLifecycle()
+    val isVotLoading by viewModel.votController.isLoading.collectAsStateWithLifecycle()
+    val votError by viewModel.votController.errorMessage.collectAsStateWithLifecycle()
+    var showVotSettingsSheet by remember { mutableStateOf(false) }
+    // ----------------------------
 
     val isLocalMedia = LocalMediaIds.isLocal(video.id)
     val showRelatedVideos = prefs.showRelatedVideos && !isLocalMedia
@@ -123,8 +125,6 @@ internal fun EnhancedVideoPlayerScreen(
             }
 
         if (isWideLayout) {
-            // The host sizes the video from the same directive (PlayerDetailPanes.supportingPaneReserve),
-            // so the video row above the main pane and the scaffold's main pane keep one width.
             val navigator =
                 rememberSupportingPaneScaffoldNavigator(
                     scaffoldDirective = calculatePaneScaffoldDirective(currentWindowAdaptiveInfo()),
@@ -149,6 +149,16 @@ internal fun EnhancedVideoPlayerScreen(
                                         layout(placeable.width, height) { placeable.place(0, 0) }
                                     },
                             )
+
+                            if (!isLocalMedia) {
+                                VotActionBar(
+                                    isEnabled = votSettings.isEnabled,
+                                    isLoading = isVotLoading,
+                                    errorMessage = votError,
+                                    onToggleClick = { viewModel.toggleVot() },
+                                    onOpenSettingsClick = { showVotSettingsSheet = true }
+                                )
+                            }
 
                             VideoInfoContent(
                                 video = video,
@@ -204,14 +214,22 @@ internal fun EnhancedVideoPlayerScreen(
         } else {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val relatedLayout = rememberFeedGridLayout(maxWidth, prefs.feedColumns)
-                // Kept through fullscreen: the layout hides the page there, and keeping the list
-                // means leaving fullscreen, or waiting for the turn into it, never shows it empty.
                 if (!isInPipMode) {
                     LazyColumn(
                         Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = maxOf(ListEndPadding, dockReserve + QueueDockGap)),
                     ) {
                         item {
+                            if (!isLocalMedia) {
+                                VotActionBar(
+                                    isEnabled = votSettings.isEnabled,
+                                    isLoading = isVotLoading,
+                                    errorMessage = votError,
+                                    onToggleClick = { viewModel.toggleVot() },
+                                    onOpenSettingsClick = { showVotSettingsSheet = true }
+                                )
+                            }
+
                             VideoInfoContent(
                                 video = video,
                                 uiState = uiState,
@@ -270,5 +288,15 @@ internal fun EnhancedVideoPlayerScreen(
                     .align(Alignment.BottomCenter)
                     .padding(bottom = dockReserve),
         )
+
+        if (showVotSettingsSheet) {
+            VotSettingsBottomSheet(
+                settings = votSettings,
+                errorMessage = votError,
+                onSettingsChanged = { viewModel.votController.updateSettings(it) },
+                onRequestRetranslate = { viewModel.toggleVot() },
+                onDismiss = { showVotSettingsSheet = false }
+            )
+        }
     }
 }
