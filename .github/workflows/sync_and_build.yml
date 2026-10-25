@@ -1,0 +1,74 @@
+name: Sync upstream & Build APK
+
+on:
+  schedule:
+    # Запуск каждый день в 03:00 ночи по UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch: # Возможность запустить синхронизацию вручную кнопкой
+
+jobs:
+  sync:
+    name: Sync with upstream Flow
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add and fetch upstream
+        run: |
+          git remote add upstream https://github.com/Flow-Tube/Flow.git
+          git fetch upstream
+
+      - name: Merge upstream into main
+        id: merge
+        run: |
+          # Пытаемся автоматически влить изменения из оригинального Flow
+          if git merge upstream/main -m "auto-sync: merge upstream/main"; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+            git push origin main
+          else
+            echo "::warning::Merge conflict detected! Ручное вмешательство требуется."
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+  build:
+    name: Build APK after sync
+    needs: sync
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Use CI Gradle properties
+        run: mkdir -p ~/.gradle && cp .github/ci-gradle.properties ~/.gradle/gradle.properties
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build GitHub Debug APK
+        run: ./gradlew assembleGithubDebug --stacktrace --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: flow-debug-apk
+          path: app/build/outputs/apk/github/debug/*.apk
