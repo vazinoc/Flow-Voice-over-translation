@@ -1,12 +1,15 @@
-name: Build Debug APK
+name: Build and Release APK
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build APK
+    name: Build & Publish Release
     runs-on: ubuntu-24.04
+    # Разрешаем Actions создавать релизы и прикреплять файлы
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout code
@@ -19,19 +22,32 @@ jobs:
           distribution: 'temurin'
 
       - name: Use CI Gradle properties
-        # Возвращаем родные лимиты памяти от разработчиков Flow, чтобы сервер не захлебнулся
         run: mkdir -p ~/.gradle && cp .github/ci-gradle.properties ~/.gradle/gradle.properties
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Build GitHub Debug APK
-        # Собираем ТОЛЬКО одну версию (githubDebug). 
-        # --no-daemon убивает фоновые процессы после шага, освобождая ОЗУ.
         run: ./gradlew assembleGithubDebug --stacktrace --no-daemon
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      # Находим скомпилированный APK и переименовываем его в понятное имя для релиза
+      - name: Prepare APK for Release
+        run: |
+          mkdir -p release-apk
+          # Находим универсальный или arm64 apk и копируем
+          find app/build/outputs/apk/github/debug/ -name "*.apk" -exec cp {} release-apk/Flow-with-Yandex-VOT.apk \;
+
+      # Публикуем в GitHub Releases
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: flow-debug-apk
-          path: app/build/outputs/apk/github/debug/*.apk
+          tag_name: "v1.0-vot-${{ github.run_number }}"
+          name: "Flow with Yandex VOT (Build #${{ github.run_number }})"
+          body: |
+            ### Flow с закадровым переводом от Яндекса
+            - Добавлен закадровый перевод видео (VOT)
+            - Панель управления и шторка настроек громкости / языков
+            - Собрано на базе последнего исходного кода Flow
+          files: release-apk/Flow-with-Yandex-VOT.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
