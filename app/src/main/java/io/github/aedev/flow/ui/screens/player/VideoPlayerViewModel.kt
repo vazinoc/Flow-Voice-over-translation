@@ -34,6 +34,9 @@ import io.github.aedev.flow.player.stream.ResetYouTubeSession
 import io.github.aedev.flow.player.stream.UpcomingPremiereProbe
 import io.github.aedev.flow.ui.screens.player.state.*
 import io.github.aedev.flow.utils.NetworkState
+import io.github.aedev.flow.vot.VotAudioSyncController
+import io.github.aedev.flow.vot.VotClient
+import io.github.aedev.flow.vot.VotStatus
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
@@ -47,14 +50,6 @@ import javax.inject.Inject
 
 private const val QUEUE_SAVE_DEBOUNCE_MS = 1_000L
 
-/**
- * Owns the player screen's state and every session entry point the UI calls: what plays, what the
- * player reports back, and what the surrounding controllers are armed with.
- *
- * The state has two writers by responsibility: this class writes what an entry point and the
- * player's own state changes land on, [PlaybackSessionApplier] writes what a resolved load lands on.
- * Both hold the one flow constructed here and gate on the same load token.
- */
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class VideoPlayerViewModel
@@ -89,6 +84,41 @@ class VideoPlayerViewModel
     ) : ViewModel() {
         private val _uiState = MutableStateFlow(VideoPlayerUiState())
         val uiState: StateFlow<VideoPlayerUiState> = _uiState.asStateFlow()
+
+        // --- Яндекс Закадровый перевод (VOT) ---
+        val votClient = VotClient()
+        val votController = VotAudioSyncController(context, playerManager, viewModelScope)
+
+        fun toggleVot() {
+            val videoId = _uiState.value.cachedVideo?.id
+                ?: playerManager.playerState.value.currentVideoId
+                ?: return
+            val durationMs = playerManager.playerState.value.duration
+            val durationSec = if (durationMs > 0) durationMs / 1000.0 else 300.0
+
+            val currentSettings = votController.settings.value
+            if (currentSettings.isEnabled) {
+                votController.disableTranslation()
+                return
+            }
+
+            viewModelScope.launch {
+                votController.setLoading(true)
+                val result = votClient.getTranslation(
+                    videoId = videoId,
+                    durationSec = durationSec,
+                    sourceLang = currentSettings.sourceLang,
+                    targetLang = currentSettings.targetLang
+                )
+                if (result.status == VotStatus.SUCCESS && result.audioUrl != null) {
+                    votController.setLoading(false)
+                    votController.attachTranslationAudio(videoId, result.audioUrl)
+                } else {
+                    votController.setLoading(false, error = result.message ?: "Не удалось перевести видео")
+                }
+            }
+        }
+        // ----------------------------------------
 
         private val notes = PlayerNotes(notesRepository, playerPreferences, viewModelScope)
 
@@ -205,7 +235,6 @@ class VideoPlayerViewModel
 
         private fun isLocalMediaId(id: String?): Boolean = LocalMediaIds.isLocal(id)
 
-        /** Arms the live chat for [videoId]; the drip loop itself waits for a visible panel. */
         fun maybeStartLiveChat(videoId: String) = liveChat.start(videoId)
 
         fun stopLiveChat() = liveChat.stop()
@@ -216,6 +245,7 @@ class VideoPlayerViewModel
 
         override fun onCleared() {
             super.onCleared()
+            votController.release()
             watchSessions.finalizeActiveSession()
             stopLiveChat()
         }
@@ -227,16 +257,11 @@ class VideoPlayerViewModel
 
         fun isVideoSavedToAnyPlaylist(videoId: String): Flow<Boolean> = playlistRepository.isVideoSavedToAnyPlaylistFlow(videoId)
 
-        /**
-         * Detect whether the device is currently on Wi-Fi.
-         * Used to select the correct quality preference (Wi-Fi vs cellular).
-         */
         private fun detectIsWifi(): Boolean = NetworkState.isOnWifi(context)
 
         init {
             loads.start()
 
-            // The first value is the empty queue of a fresh process; saving it would erase the one to restore.
             combine(playerManager.queueVideos, playerManager.currentQueueIndexState, ::Pair)
                 .drop(1)
                 .debounce(QUEUE_SAVE_DEBOUNCE_MS)
@@ -275,7 +300,6 @@ class VideoPlayerViewModel
         private suspend fun onPlayerStateChanged(playerState: EnhancedPlayerState) {
             _uiState.update { it.mirrorPlayerState(playerState) }
 
-            // A video that prepares successfully is not unplayable, whatever a past failure said.
             playerState.currentVideoId
                 ?.takeIf { playerState.isPrepared && it != clearedUnplayableVideoId }
                 ?.let { preparedVideoId ->
@@ -304,12 +328,6 @@ class VideoPlayerViewModel
 
         fun syncWithCurrentPlayerVideo(video: Video) = loads.syncWith(video)
 
-        /**
-         * Plays a video by immediately caching metadata and triggering stream load.
-         * This ensures the UI shows video info immediately while streams are fetched.
-         * [userOpened] is false when the video only follows another (next, previous), which keeps playing.
-         * [startPositionMs] opens it at that time instead of where the viewer left it.
-         */
         fun playVideo(
             video: Video,
             userOpened: Boolean = true,
@@ -356,8 +374,8 @@ class VideoPlayerViewModel
             playerManager.armStartPaused(videoId.takeIf { userOpened && lifecyclePlayback.settings.startVideosPaused })
         }
 
-        /** Drops the load, the queue and the music player so this screen owns playback outright. */
         private fun takeOverPlayback() {
+            votController.disableTranslation()
             loads.cancel()
             recovery.onPlaybackRequested()
             playerManager.pause()
@@ -367,6 +385,7 @@ class VideoPlayerViewModel
         }
 
         fun clearVideo() {
+            votController.disableTranslation()
             loads.nextToken()
             loads.cancel()
             recovery.onPlaybackRequested()
@@ -417,7 +436,6 @@ class VideoPlayerViewModel
 
         fun ensurePlaybackPrepared(videoId: String) = loads.ensurePrepared(videoId)
 
-        /** [shuffle] turns the queue's shuffle on or off for this list; null keeps the current setting. */
         fun playPlaylist(
             videos: List<Video>,
             startIndex: Int,
@@ -464,7 +482,6 @@ class VideoPlayerViewModel
             }
         }
 
-        /** Loads [videoId]'s streams; see [PlaybackLoadController.load]. */
         fun loadVideoInfo(
             videoId: String,
             isWifi: Boolean = true,
@@ -500,16 +517,13 @@ class VideoPlayerViewModel
             viewModelScope.launch { watchLaterCleanup.onProgress(videoId, position, duration) }
         }
 
-        /** The app is going to the background: the recap gets the open session's progress so far. */
         fun checkpointWatchSession() = watchSessions.checkpoint()
 
-        /** Live streams keep no history row; their watching time goes to the recap only. */
         fun trackLivePlayback(
             video: Video,
             position: Long,
         ) = watchSessions.trackLive(video, position)
 
-        /** A SponsorBlock segment the player just skipped, for the recap's time-saved total. */
         fun onSponsorSegmentSkipped(
             category: String,
             skippedMs: Long,
@@ -547,12 +561,10 @@ class VideoPlayerViewModel
 
         fun toggleAutoplay(enabled: Boolean) = settings.toggleAutoplay(enabled)
 
-        /** Adds a subtitle file to the device file or download that is playing; false when unreadable. */
         suspend fun addSubtitleFile(uri: android.net.Uri): Boolean = sessionApplier.addSubtitleFile(uri)
 
         suspend fun subtitleFolder(): android.net.Uri? = sessionApplier.subtitleFolder()
 
-        /** Shifts the captions by [offsetMs]: positive shows them later. */
         fun setSubtitleOffset(offsetMs: Long) {
             viewModelScope.launch { sessionApplier.setSubtitleOffset(offsetMs) }
         }
@@ -590,32 +602,6 @@ class VideoPlayerViewModel
         }
 
         fun loadMoreCommentReplies(comment: Comment) {
-            val votClient = VotClient()
-val votController = VotAudioSyncController(applicationContext, exoPlayer)
-
-fun toggleVot(currentVideoId: String, durationSeconds: Double) {
-    val currentSettings = votController.settings.value
-    if (currentSettings.isEnabled) {
-        votController.disableTranslation()
-        return
-    }
-
-    viewModelScope.launch {
-        votController.setLoading(true)
-        val result = votClient.getTranslation(
-            videoId = currentVideoId,
-            durationSec = durationSeconds,
-            sourceLang = currentSettings.sourceLang,
-            targetLang = currentSettings.targetLang
-        )
-        if (result.status == VotStatus.SUCCESS && result.audioUrl != null) {
-            votController.setLoading(false)
-            votController.attachTranslationAudio(result.audioUrl)
-        } else {
-            votController.setLoading(false, error = result.message ?: "Не удалось перевести видео")
-        }
-    }
-}
             val videoId = _uiState.value.cachedVideo?.id ?: return
             comments.loadMoreReplies(videoId, comment)
         }
