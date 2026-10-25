@@ -1,4 +1,4 @@
-package com.flow.vot
+package io.github.aedev.flow.vot
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
