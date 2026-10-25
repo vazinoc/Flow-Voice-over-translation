@@ -1,53 +1,106 @@
-name: Build and Release APK
+name: Auto Sync & Publish Release
 
 on:
+  # 1. Ручной запуск в любой момент по кнопке Run workflow
   workflow_dispatch:
 
+  # 2. Автоматический запуск каждые 6 часов (проверяет релизы и обновления оригинала)
+  schedule:
+    - cron: '0 */6 * * *'
+
 jobs:
-  build:
-    name: Build & Publish Release
+  sync_and_release:
+    name: Sync, Build & Release
     runs-on: ubuntu-24.04
-    # Разрешаем Actions создавать релизы и прикреплять файлы
     permissions:
-      contents: write
+      contents: write # Право делать коммиты и создавать публичные Releases
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Подтягиваем обновления из официального Flow
+      - name: Fetch and Merge Upstream
+        id: sync
+        run: |
+          git remote add upstream https://github.com/Flow-Tube/Flow.git || true
+          git fetch upstream main
+          
+          # Проверяем, появились ли новые коммиты
+          LOCAL_HASH=$(git rev-parse HEAD)
+          UPSTREAM_HASH=$(git rev-parse upstream/main)
+
+          if [ "$LOCAL_HASH" != "$UPSTREAM_HASH" ]; then
+            echo "Обнаружены обновления в оригинале! Объединяем..."
+            if git merge upstream/main -m "auto: merge upstream updates"; then
+              git push origin main
+              echo "has_updates=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning::Конфликт слияния! Автосборка отменена."
+              exit 1
+            fi
+          else
+            echo "Обновлений в оригинале нет."
+            # Если запущено вручную — собираем в любом случае
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "has_updates=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "has_updates=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      # Если обновлений не было и это был автозапуск — не тратим минуты сервера
+      - name: Check if build needed
+        if: ${{ steps.sync.outputs.has_updates != 'true' }}
+        run: |
+          echo "Сборка не требуется, всё актуально."
+          exit 0
 
       - name: Set up JDK 21
+        if: ${{ steps.sync.outputs.has_updates == 'true' }}
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
 
       - name: Use CI Gradle properties
+        if: ${{ steps.sync.outputs.has_updates == 'true' }}
         run: mkdir -p ~/.gradle && cp .github/ci-gradle.properties ~/.gradle/gradle.properties
 
       - name: Grant execute permission for gradlew
+        if: ${{ steps.sync.outputs.has_updates == 'true' }}
         run: chmod +x gradlew
 
       - name: Build GitHub Debug APK
+        if: ${{ steps.sync.outputs.has_updates == 'true' }}
         run: ./gradlew assembleGithubDebug --stacktrace --no-daemon
 
-      # Находим скомпилированный APK и переименовываем его в понятное имя для релиза
       - name: Prepare APK for Release
+        if: ${{ steps.sync.outputs.has_updates == 'true' }}
         run: |
           mkdir -p release-apk
-          # Находим универсальный или arm64 apk и копируем
           find app/build/outputs/apk/github/debug/ -name "*.apk" -exec cp {} release-apk/Flow-with-Yandex-VOT.apk \;
 
-      # Публикуем в GitHub Releases
+      # Публикуем новый публичный Release
       - name: Create GitHub Release
+        if: ${{ steps.sync.outputs.has_updates == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v1.0-vot-${{ github.run_number }}"
-          name: "Flow with Yandex VOT (Build #${{ github.run_number }})"
+          tag_name: "v1.0-build-${{ github.run_number }}"
+          name: "Flow + Yandex VOT (Сборка #${{ github.run_number }})"
           body: |
-            ### Flow с закадровым переводом от Яндекса
-            - Добавлен закадровый перевод видео (VOT)
-            - Панель управления и шторка настроек громкости / языков
-            - Собрано на базе последнего исходного кода Flow
+            ### Автоматический релиз Flow с закадровым переводом от Яндекса
+            - Синхронизировано с последней версией официального репозитория Flow
+            - Встроен закадровый перевод видео (VOT) и приглушение оригинального звука
+            - Готовый установочный APK без необходимости распаковки
           files: release-apk/Flow-with-Yandex-VOT.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
