@@ -3,7 +3,9 @@ package io.github.aedev.flow.vot
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -13,6 +15,103 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
+/**
+ * Компактная панель закадрового перевода под видеоплеером
+ */
+@Composable
+fun VotActionBar(
+    isEnabled: Boolean,
+    isLoading: Boolean,
+    errorMessage: String?,
+    onToggleClick: () -> Unit,
+    onOpenSettingsClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = if (isEnabled) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Translate,
+                        contentDescription = "VOT",
+                        tint = if (isEnabled) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+
+                Column {
+                    Text(
+                        text = when {
+                            isLoading -> "Загрузка перевода Яндекс..."
+                            isEnabled -> "Закадровый перевод включён"
+                            else -> "Закадровый перевод (Яндекс)"
+                        },
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    if (!errorMessage.isNullOrEmpty()) {
+                        Text(
+                            text = errorMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = onToggleClick,
+                    enabled = !isLoading,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text(if (isEnabled) "Выкл" else "Перевести")
+                }
+
+                IconButton(onClick = onOpenSettingsClick) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Настройки перевода"
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Иконка для оверлея поверх видео
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VotOverlayButton(
@@ -60,11 +159,7 @@ fun VotSettingsBottomSheet(
         "en" to "Английский",
         "de" to "Немецкий",
         "fr" to "Французский",
-        "es" to "Испанский",
-        "it" to "Итальянский",
-        "zh" to "Китайский",
-        "ja" to "Японский",
-        "ko" to "Корейский"
+        "es" to "Испанский"
     )
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -76,7 +171,7 @@ fun VotSettingsBottomSheet(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
-                text = "Закадровый перевод (Яндекс VOT)",
+                text = "Настройки перевода (Яндекс VOT)",
                 style = MaterialTheme.typography.titleMedium
             )
 
@@ -88,7 +183,6 @@ fun VotSettingsBottomSheet(
                 )
             }
 
-            // Переключатель включения
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -104,7 +198,6 @@ fun VotSettingsBottomSheet(
                 )
             }
 
-            // Ползунок громкости перевода
             Column {
                 Text("Громкость перевода: ${(settings.translationVolume * 100).roundToInt()}%")
                 Slider(
@@ -114,7 +207,6 @@ fun VotSettingsBottomSheet(
                 )
             }
 
-            // Ползунок громкости оригинала (Audio Ducking)
             Column {
                 Text("Громкость оригинала: ${(settings.originalVolume * 100).roundToInt()}%")
                 Slider(
@@ -124,13 +216,12 @@ fun VotSettingsBottomSheet(
                 )
             }
 
-            // Выбор исходного языка видео
             Text("Язык оригинала:", style = MaterialTheme.typography.labelLarge)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                languages.take(4).forEach { (code, title) ->
+                languages.forEach { (code, title) ->
                     FilterChip(
                         selected = settings.sourceLang == code,
                         onClick = {
