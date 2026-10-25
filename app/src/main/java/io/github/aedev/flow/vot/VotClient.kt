@@ -1,5 +1,4 @@
-package com.flow.vot // Замени на корневой пакет проекта Flow
-
+package io.github.aedev.flow.vot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
