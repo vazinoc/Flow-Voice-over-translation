@@ -1,4 +1,4 @@
-package com.flow.vot
+package io.github.aedev.flow.vot
 
 import android.content.Context
 import androidx.media3.common.MediaItem
