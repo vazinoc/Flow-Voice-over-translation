@@ -1,8 +1,11 @@
 package io.github.aedev.flow.vot
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import io.github.aedev.flow.player.EnhancedPlayerManager
 import kotlinx.coroutines.CoroutineScope
@@ -16,8 +19,8 @@ data class VotSettings(
     val isEnabled: Boolean = false,
     val sourceLang: String = "en",
     val targetLang: String = "ru",
-    val originalVolume: Float = 0.20f,
-    val translationVolume: Float = 1.0f
+    val originalVolume: Float = 0.20f, // 20% громкости оригинала при включенном переводе
+    val translationVolume: Float = 1.0f // 100% громкости перевода
 )
 
 class VotAudioSyncController(
@@ -26,6 +29,7 @@ class VotAudioSyncController(
     scope: CoroutineScope
 ) {
     private val votPlayer: ExoPlayer = ExoPlayer.Builder(context).build()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val _settings = MutableStateFlow(VotSettings())
     val settings: StateFlow<VotSettings> = _settings
@@ -39,21 +43,23 @@ class VotAudioSyncController(
     private var currentActiveVideoId: String? = null
 
     init {
-        // Автоматическая синхронизация с состоянием основного плеера Flow
         playerManager.playerState
             .onEach { state ->
-                // Если переключили видео — сбрасываем старый перевод
+                // Если переключили на другое видео — выключаем перевод и возвращаем 100% громкости
                 if (state.currentVideoId != currentActiveVideoId && _settings.value.isEnabled) {
                     disableTranslation()
                 }
                 if (!_settings.value.isEnabled) return@onEach
 
-                // Синхронизация скорости
+                // Удерживаем приглушенную громкость оригинала
+                setMainPlayerVolume(_settings.value.originalVolume)
+
+                // Синхронизация скорости воспроизведения
                 if (votPlayer.playbackParameters.speed != state.playbackSpeed) {
                     votPlayer.playbackParameters = PlaybackParameters(state.playbackSpeed)
                 }
 
-                // Синхронизация паузы / воспроизведения
+                // Синхронизация паузы и воспроизведения
                 if (state.isPlaying && !votPlayer.isPlaying) {
                     syncPositionIfNeeded(state.currentPosition)
                     votPlayer.play()
@@ -65,6 +71,38 @@ class VotAudioSyncController(
                 syncPositionIfNeeded(state.currentPosition)
             }
             .launchIn(scope)
+    }
+
+    /**
+     * Находит ExoPlayer внутри EnhancedPlayerManager и меняет громкость оригинального видео
+     */
+    private fun setMainPlayerVolume(volume: Float) {
+        val safeVolume = volume.coerceIn(0f, 1f)
+        mainHandler.post {
+            try {
+                // 1. Пробуем вызвать setVolume(Float), если такой метод есть в EnhancedPlayerManager
+                val method = playerManager.javaClass.methods.firstOrNull {
+                    it.name == "setVolume" && it.parameterTypes.size == 1 &&
+                        (it.parameterTypes[0] == Float::class.javaPrimitiveType || it.parameterTypes[0] == Float::class.java)
+                }
+                if (method != null) {
+                    method.invoke(playerManager, safeVolume)
+                    return@post
+                }
+
+                // 2. Иначе находим само поле ExoPlayer / Player внутри EnhancedPlayerManager и меняем ему volume
+                for (field in playerManager.javaClass.declaredFields) {
+                    field.isAccessible = true
+                    val value = field.get(playerManager)
+                    if (value is Player) {
+                        value.volume = safeVolume
+                        return@post
+                    }
+                }
+            } catch (_: Exception) {
+                // Игнорируем, если плеер ещё не инициализирован
+            }
+        }
     }
 
     fun attachTranslationAudio(videoId: String, audioUrl: String) {
@@ -79,6 +117,9 @@ class VotAudioSyncController(
 
         _settings.value = _settings.value.copy(isEnabled = true)
 
+        // Приглушаем оригинальную дорожку видео
+        setMainPlayerVolume(_settings.value.originalVolume)
+
         if (state.isPlaying) {
             votPlayer.play()
         }
@@ -89,12 +130,16 @@ class VotAudioSyncController(
         _settings.value = _settings.value.copy(isEnabled = false)
         votPlayer.pause()
         votPlayer.clearMediaItems()
+
+        // Возвращаем 100% громкости оригинальному видео
+        setMainPlayerVolume(1.0f)
     }
 
     fun updateSettings(newSettings: VotSettings) {
         _settings.value = newSettings
         if (newSettings.isEnabled) {
             votPlayer.volume = newSettings.translationVolume
+            setMainPlayerVolume(newSettings.originalVolume)
         } else {
             disableTranslation()
         }
@@ -114,6 +159,7 @@ class VotAudioSyncController(
     }
 
     fun release() {
+        setMainPlayerVolume(1.0f)
         votPlayer.release()
     }
 }
