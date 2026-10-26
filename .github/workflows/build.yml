@@ -78,6 +78,14 @@ jobs:
             exit 1
           fi
 
+      # СОХРАНЯЕМ И КЭШИРУЕМ КЛЮЧ ПОДПИСИ (для Obtainium)
+      - name: Cache Debug Keystore
+        if: ${{ steps.check_release.outputs.should_build == 'true' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore
+
       - name: Set up JDK 21
         if: ${{ steps.check_release.outputs.should_build == 'true' }}
         uses: actions/setup-java@v4
