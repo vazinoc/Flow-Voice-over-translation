@@ -216,7 +216,32 @@ fun VotSettingsBottomSheet(
                 )
             }
 
-            Text("Язык оригинала:", style = MaterialTheme.typography.labelLarge)
+            OutlinedTextField(
+                value = settings.yandexSessionId,
+                onValueChange = { onSettingsChanged(settings.copy(yandexSessionId = it)) },
+                label = { Text("Токен Yandex (Session ID)") },
+                placeholder = { Text("Вставьте куки session_id") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Живые голоса (премиум)")
+                Switch(
+                    checked = settings.useLiveVoices,
+                    enabled = settings.yandexSessionId.isNotBlank(), // Включается только если введен токен
+                    onCheckedChange = { checked ->
+                        onSettingsChanged(settings.copy(useLiveVoices = checked))
+                        if (settings.isEnabled) onRequestRetranslate()
+                    }
+                )
+            }
+
+            Text("Язык оригинала:", style = MaterialTheme.typography.labelLarge))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
