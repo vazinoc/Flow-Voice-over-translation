@@ -34,11 +34,15 @@ class VotClient(private val httpClient: OkHttpClient = OkHttpClient()) {
     /**
      * Запрашивает перевод у Яндекса и ждёт готовности (если перевод ещё в очереди).
      */
+    /**
+     * Запрашивает перевод у Яндекса и ждёт готовности (если перевод ещё в очереди).
+     */
     suspend fun getTranslation(
         videoId: String,
         durationSec: Double,
         sourceLang: String = "en",
-        targetLang: String = "ru"
+        targetLang: String = "ru",
+        yandexSessionId: String? = null // Новый параметр для токена
     ): VotResult = withContext(Dispatchers.IO) {
         val videoUrl = "https://youtu.be/$videoId"
         
@@ -49,17 +53,25 @@ class VotClient(private val httpClient: OkHttpClient = OkHttpClient()) {
                 duration = durationSec,
                 firstRequest = (attempt == 0),
                 requestLang = sourceLang,
-                responseLang = targetLang
+                responseLang = targetLang,
+                useLiveVoices = !yandexSessionId.isNullOrBlank() // Если токен есть, просим живые голоса
             )
             val signature = hmacSha256(payload)
             val uuid = UUID.randomUUID().toString().replace("-", "")
 
-            val request = Request.Builder()
+            val requestBuilder = Request.Builder()
                 .url(API_URL)
                 .addHeader("Accept", "application/x-protobuf")
                 .addHeader("User-Agent", USER_AGENT)
                 .addHeader("Vtrans-Signature", signature)
                 .addHeader("Sec-Vtrans-Token", uuid)
+
+            // Если передали токен, прикрепляем его как Cookie для авторизации
+            if (!yandexSessionId.isNullOrBlank()) {
+                requestBuilder.addHeader("Cookie", "Session_id=$yandexSessionId")
+            }
+
+            val request = requestBuilder
                 .post(payload.toRequestBody("application/x-protobuf".toMediaType()))
                 .build()
 
@@ -88,28 +100,16 @@ class VotClient(private val httpClient: OkHttpClient = OkHttpClient()) {
         VotResult(VotStatus.FAILED, message = "Превышено время ожидания перевода")
     }
 
-    private fun hmacSha256(data: ByteArray): String {
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(HMAC_KEY.toByteArray(Charsets.UTF_8), "HmacSHA256"))
-        return mac.doFinal(data).joinToString("") { "%02x".format(it) }
-    }
-
     /**
      * Ручная упаковка Protobuf-сообщения VideoTranslationRequest
-     * Поля по схеме VOT:
-     * 3 (string) = url
-     * 5 (bool)   = firstRequest
-     * 6 (double) = duration
-     * 7 (int32)  = unknown0 (1)
-     * 8 (string) = language (исходный язык)
-     * 14 (string)= responseLanguage (целевой язык)
      */
     private fun encodeTranslationRequest(
         url: String,
         duration: Double,
         firstRequest: Boolean,
         requestLang: String,
-        responseLang: String
+        responseLang: String,
+        useLiveVoices: Boolean = false // Новый параметр
     ): ByteArray {
         val out = ByteArrayOutputStream()
 
@@ -124,18 +124,18 @@ class VotClient(private val httpClient: OkHttpClient = OkHttpClient()) {
 
         fun writeString(fieldNumber: Int, str: String) {
             val bytes = str.toByteArray(Charsets.UTF_8)
-            writeVarint((fieldNumber shl 3) or 2) // wire type 2 (length-delimited)
+            writeVarint((fieldNumber shl 3) or 2) // wire type 2
             writeVarint(bytes.size)
             out.write(bytes)
         }
 
         fun writeBool(fieldNumber: Int, value: Boolean) {
-            writeVarint((fieldNumber shl 3) or 0) // wire type 0 (varint)
+            writeVarint((fieldNumber shl 3) or 0) // wire type 0
             writeVarint(if (value) 1 else 0)
         }
 
         fun writeDouble(fieldNumber: Int, value: Double) {
-            writeVarint((fieldNumber shl 3) or 1) // wire type 1 (64-bit)
+            writeVarint((fieldNumber shl 3) or 1) // wire type 1
             val bits = java.lang.Double.doubleToRawLongBits(value)
             for (i in 0..7) {
                 out.write(((bits ushr (i * 8)) and 0xFF).toInt())
@@ -148,6 +148,12 @@ class VotClient(private val httpClient: OkHttpClient = OkHttpClient()) {
         writeBool(7, true) // unknown0 = 1
         writeString(8, requestLang)
         writeString(14, responseLang)
+        
+        // Поле 16 в Protobuf API Яндекса включает premium/live голоса
+        if (useLiveVoices) {
+            writeVarint((16 shl 3) or 0) // wire type 0 (varint)
+            writeVarint(1) // 1 = true
+        }
 
         return out.toByteArray()
     }
