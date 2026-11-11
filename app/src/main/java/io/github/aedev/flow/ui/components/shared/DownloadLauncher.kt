@@ -63,6 +63,7 @@ internal object DownloadLauncher {
         audioFormat: PlayerResponse.StreamingData.Format,
         threads: Int? = null,
         subtitle: DownloadSubtitle? = null,
+        withYandexTranslation: Boolean = false // Добавили наш параметр
     ) {
         promptStoragePermissionIfNeeded(context)
         submit(
@@ -76,6 +77,7 @@ internal object DownloadLauncher {
                 audioLanguage = audioFormat.audioLanguageTag,
                 threads = threads,
                 subtitle = subtitle,
+                withYandexTranslation = withYandexTranslation // Передаем его в запрос на скачивание
             ),
         )
         Toast.makeText(context, context.getString(R.string.ui_started_download, video.title), Toast.LENGTH_SHORT).show()
