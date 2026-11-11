@@ -125,6 +125,7 @@ fun MediaDownloadDialogCompact(
 
     var title by remember(video.id) { mutableStateOf(video.title) }
     var threads by remember(defaultThreads) { mutableStateOf(defaultThreads.coerceIn(MIN_THREADS, MAX_THREADS)) }
+    var isYandexTranslationEnabled by remember { mutableStateOf(false) }
 
     var isAudioMode by remember(lastType, hasVideo, hasAudio) {
         mutableStateOf((lastType == "AUDIO" && hasAudio) || !hasVideo)
@@ -196,7 +197,7 @@ fun MediaDownloadDialogCompact(
             return
         }
         val subtitle = subtitleChoice?.toDownloadSubtitle() ?: DownloadSubtitle.OFF.takeIf { subtitleOptions.isNotEmpty() }
-        DownloadLauncher.startVideoDownload(context, taggedVideo, stream, audio, threads, subtitle)
+        DownloadLauncher.startVideoDownload(context, taggedVideo, stream, audio, threads, subtitle, isYandexTranslationEnabled)
         if (subtitleOptions.isNotEmpty()) rememberDownloadSubtitleChoice(prefs, subtitleChoice)
         downloadPrefsScope.launch {
             prefs.setLastDownloadVideoChoice(selectedHeight, selectedCodec)
