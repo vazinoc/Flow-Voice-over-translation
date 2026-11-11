@@ -32,6 +32,8 @@ data class DownloadRequest(
     val subtitle: DownloadSubtitle? = null,
     /** Where that file was written, so deleting the download removes it too. */
     val subtitleFile: String? = null,
+    /** Флаг закадрового перевода Яндекса */
+    val withYandexTranslation: Boolean = false,
 ) {
     val videoId: String get() = tags.videoId
     val kind: DownloadKind get() = tags.kind
