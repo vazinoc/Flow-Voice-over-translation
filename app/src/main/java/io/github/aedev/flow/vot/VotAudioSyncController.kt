@@ -20,7 +20,9 @@ data class VotSettings(
     val sourceLang: String = "en",
     val targetLang: String = "ru",
     val originalVolume: Float = 0.20f,
-    val translationVolume: Float = 1.0f
+    val translationVolume: Float = 1.0f,
+    val yandexSessionId: String = "",
+    val useLiveVoices: Boolean = false
 )
 
 class VotAudioSyncController(
