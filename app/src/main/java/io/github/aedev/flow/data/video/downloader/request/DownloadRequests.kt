@@ -18,6 +18,7 @@ fun Video.toDownloadRequest(
     collectionId: String? = null,
     threads: Int? = null,
     subtitle: DownloadSubtitle? = null,
+    withYandexTranslation: Boolean = false // <-- ДОБАВЛЯЕМ СЮДА
 ): DownloadRequest {
     val kind =
         when {
@@ -84,9 +85,12 @@ fun MusicTrack.toDownloadRequest(
         audioOnly = true,
         collectionId = collectionId,
         durationSeconds = duration,
-        artists = credited.map { StoredArtist(it.name, it.id) },
+        artists = artists.map { StoredArtist(name = it.name, id = it.id) },
+        subtitle = subtitle,
+        withYandexTranslation = withYandexTranslation // <-- И СЮДА
     )
 }
+   
 
 internal fun sourceUrlFor(
     kind: DownloadKind,
