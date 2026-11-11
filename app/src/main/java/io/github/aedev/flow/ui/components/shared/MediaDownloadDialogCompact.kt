@@ -304,6 +304,26 @@ fun MediaDownloadDialogCompact(
                             onSelect = { subtitleChoice = it },
                         )
                     }
+                    
+                    // --- НАШЕ ДОБАВЛЕНИЕ (ГАЛОЧКА ПЕРЕВОДА) ---
+                    Spacer(Modifier.height(10.dp))
+                    var isYandexTranslationEnabled by remember { mutableStateOf(false) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Закадровый перевод (Яндекс)",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        androidx.compose.material3.Switch(
+                            checked = isYandexTranslationEnabled,
+                            onCheckedChange = { isYandexTranslationEnabled = it }
+                        )
+                    }
+                    // ------------------------------------------
+
                 } else if (isAudioMode && hasAudio) {
                     DownloadDropdownRow(
                         label = stringResource(R.string.download_audio),
