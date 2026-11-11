@@ -109,7 +109,9 @@ class VideoPlayerViewModel
                     videoId = videoId,
                     durationSec = durationSec,
                     sourceLang = currentSettings.sourceLang,
-                    targetLang = currentSettings.targetLang
+                    targetLang = currentSettings.targetLang,
+                    // Передаем токен, только если включен тумблер "Живые голоса"
+                    yandexSessionId = currentSettings.yandexSessionId.takeIf { currentSettings.useLiveVoices }
                 )
                 if (result.status == VotStatus.SUCCESS && result.audioUrl != null) {
                     votController.setLoading(false)
